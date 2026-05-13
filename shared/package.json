@@ -1,0 +1,13 @@
+{
+  "name": "@pixel-agent/shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/events.js",
+  "types": "dist/events.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

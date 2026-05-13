@@ -1,0 +1,53 @@
+{
+  "name": "@pixel-agent/extension",
+  "displayName": "Pixel Agent",
+  "description": "Bridge Cursor workspace and Git activity to the Pixel Agent desktop companion.",
+  "version": "1.0.0",
+  "private": true,
+  "publisher": "pixel-agent",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pixelAgent.connect",
+        "title": "Pixel Agent: Connect"
+      },
+      {
+        "command": "pixelAgent.disconnect",
+        "title": "Pixel Agent: Disconnect"
+      },
+      {
+        "command": "pixelAgent.sendTestMessage",
+        "title": "Pixel Agent: Send Test Message"
+      },
+      {
+        "command": "pixelAgent.showGitStatus",
+        "title": "Pixel Agent: Show Current Git Status"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "@pixel-agent/shared": "1.0.0",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.8.3"
+  }
+}

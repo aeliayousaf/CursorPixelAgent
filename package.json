@@ -1,0 +1,21 @@
+{
+  "name": "pixel-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pixel Agent — animated desktop companion for Cursor",
+  "workspaces": [
+    "apps/*",
+    "shared"
+  ],
+  "scripts": {
+    "dev:desktop": "npm run dev -w @pixel-agent/desktop",
+    "build:desktop": "npm run build -w @pixel-agent/desktop",
+    "package:desktop": "npm run package -w @pixel-agent/desktop",
+    "dev:extension": "npm run watch -w @pixel-agent/extension",
+    "build:extension": "npm run compile -w @pixel-agent/extension",
+    "build": "npm run build -w @pixel-agent/shared && npm run build:extension && npm run build:desktop"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
