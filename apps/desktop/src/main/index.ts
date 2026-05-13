@@ -3,12 +3,14 @@ import path from "node:path";
 import { EventWebSocketServer } from "./websocketServer";
 import { SettingsStore, type AppSettings } from "./settingsStore";
 import { CursorApiService } from "../services/cursorApi";
+import { WindowWalker } from "./windowWalker";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let wsServer: EventWebSocketServer | null = null;
 let cursorApi: CursorApiService | null = null;
 let usagePollTimer: NodeJS.Timeout | null = null;
+let windowWalker: WindowWalker | null = null;
 
 const settingsStore = new SettingsStore();
 
@@ -60,22 +62,33 @@ function restartUsagePolling(): void {
       return;
     }
     const usage = await cursorApi.fetchUsageSummary();
-    if (!usage) {
-      return;
-    }
     wsServer?.emitLocalEvent({
       type: "ai_usage_update",
       source: "desktop-cursor-api",
       timestamp: new Date().toISOString(),
       payload: {
-        message:
-          usage.message ??
-          (usage.usagePercent !== undefined
-            ? `Token usage is at ${usage.usagePercent}% today.`
-            : "Token usage updated."),
+        message: usage.message,
         usagePercent: usage.usagePercent,
+        spendUsd: usage.spendUsd,
+        requestsToday: usage.requestsToday,
+        updateStatusOnly: true,
       },
     });
+
+    if (usage.usagePercent !== undefined && usage.usagePercent >= 75) {
+      wsServer?.emitLocalEvent({
+        type: "warning",
+        source: "desktop-cursor-api",
+        timestamp: new Date().toISOString(),
+        payload: {
+          message:
+            usage.usagePercent >= 90
+              ? "Token usage is very high today."
+              : "Token usage is getting high today.",
+          usagePercent: usage.usagePercent,
+        },
+      });
+    }
   };
 
   void poll();
@@ -112,11 +125,25 @@ function createMainWindow(): void {
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
     applyWindowSettings(settingsStore.get());
+    startWindowWalker();
   });
 
   mainWindow.on("closed", () => {
+    windowWalker?.stop();
+    windowWalker = null;
     mainWindow = null;
   });
+}
+
+function startWindowWalker(): void {
+  windowWalker?.stop();
+  windowWalker = new WindowWalker({
+    getWindow: () => mainWindow,
+    onStateChange: (state) => {
+      broadcastToRenderer("walker:state", state);
+    },
+  });
+  windowWalker.start();
 }
 
 function createTray(): void {
@@ -151,6 +178,11 @@ function registerIpc(): void {
       return;
     }
     mainWindow.setIgnoreMouseEvents(false);
+    windowWalker?.setPaused(true);
+  });
+
+  ipcMain.on("walker:set-paused", (_event, paused: boolean) => {
+    windowWalker?.setPaused(paused);
   });
 
   ipcMain.on("window:hide", () => {
@@ -230,5 +262,6 @@ app.on("before-quit", () => {
   if (usagePollTimer) {
     clearInterval(usagePollTimer);
   }
+  windowWalker?.stop();
   wsServer?.stop();
 });

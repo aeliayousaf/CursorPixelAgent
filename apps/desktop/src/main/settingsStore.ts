@@ -21,11 +21,24 @@ export class SettingsStore {
   });
 
   get(): AppSettings {
-    return { ...defaults, ...this.store.store };
+    const stored = { ...defaults, ...this.store.store };
+    return {
+      ...stored,
+      cursorApiKey: stored.cursorApiKey.trim(),
+      teamId: stored.teamId.trim(),
+    };
   }
 
   update(partial: Partial<AppSettings>): AppSettings {
-    for (const [key, value] of Object.entries(partial)) {
+    const normalized: Partial<AppSettings> = { ...partial };
+    if (typeof normalized.cursorApiKey === "string") {
+      normalized.cursorApiKey = normalized.cursorApiKey.trim();
+    }
+    if (typeof normalized.teamId === "string") {
+      normalized.teamId = normalized.teamId.trim();
+    }
+
+    for (const [key, value] of Object.entries(normalized)) {
       if (value !== undefined) {
         this.store.set(key as keyof AppSettings, value as AppSettings[keyof AppSettings]);
       }

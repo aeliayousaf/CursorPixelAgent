@@ -1,5 +1,6 @@
 import type { AppSettings } from "../types/settings";
 import type { PixelAgentEvent } from "@pixel-agent/shared";
+import type { WalkerState } from "./windowWalker";
 
 export interface DesktopApi {
   getSettings: () => Promise<AppSettings>;
@@ -7,6 +8,8 @@ export interface DesktopApi {
   onAgentEvent: (callback: (event: PixelAgentEvent) => void) => () => void;
   onSettingsUpdated: (callback: (settings: AppSettings) => void) => () => void;
   onOpenSettings: (callback: () => void) => () => void;
+  onWalkerState: (callback: (state: WalkerState) => void) => () => void;
+  setWalkerPaused: (paused: boolean) => void;
   hideWindow: () => void;
   quitApp: () => void;
   openContextMenu: () => void;
@@ -43,6 +46,14 @@ const desktopApi: DesktopApi = {
     ipcRenderer.on("ui:open-settings", listener);
     return () => ipcRenderer.removeListener("ui:open-settings", listener);
   },
+  onWalkerState: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: WalkerState) => {
+      callback(payload);
+    };
+    ipcRenderer.on("walker:state", listener);
+    return () => ipcRenderer.removeListener("walker:state", listener);
+  },
+  setWalkerPaused: (paused) => ipcRenderer.send("walker:set-paused", paused),
   hideWindow: () => ipcRenderer.send("window:hide"),
   quitApp: () => ipcRenderer.send("app:quit"),
   openContextMenu: () => ipcRenderer.send("context:open"),

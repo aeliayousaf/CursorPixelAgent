@@ -45,8 +45,16 @@ export function useDesktopBridge() {
 
     const unsubEvent = window.pixelAgent.onAgentEvent((event) => {
       const presentation = presentationForEvent(event);
+      const updateStatusOnly =
+        event.type === "ai_usage_update" && event.payload?.updateStatusOnly === true;
+
       setLatestEvent(event);
       setAgentStatus((previous) => applyEventToAgentStatus(previous, event));
+
+      if (updateStatusOnly) {
+        return;
+      }
+
       setAnimation(presentation.animation);
       setBubbleMessage(presentation.message);
     });

@@ -5,6 +5,7 @@ import { SpeechBubble } from "../components/SpeechBubble";
 import { StatusPanel } from "../components/StatusPanel";
 import { useAgentAnimation } from "../hooks/useAgentAnimation";
 import { useIdleMessages } from "../hooks/useIdleMessages";
+import { useWindowWalker } from "../hooks/useWindowWalker";
 import { useDesktopBridge } from "../store/useDesktopBridge";
 
 export function App() {
@@ -23,7 +24,9 @@ export function App() {
   } = useDesktopBridge();
 
   const [statusOpen, setStatusOpen] = useState(false);
-  const idleMessage = useIdleMessages(!bubbleMessage && !settingsOpen && !statusOpen);
+  const walkerPaused = settingsOpen || statusOpen;
+  const { walking, facingLeft } = useWindowWalker(walkerPaused);
+  const idleMessage = useIdleMessages(!bubbleMessage && !walkerPaused);
   const activeMessage = bubbleMessage ?? idleMessage;
 
   const {
@@ -36,7 +39,7 @@ export function App() {
   } = useAgentAnimation({
     eventAnimation: animation,
     activityKey: activeMessage,
-    paused: settingsOpen || statusOpen,
+    paused: walkerPaused,
   });
 
   useEffect(() => {
@@ -96,6 +99,8 @@ export function App() {
             theme={settings.theme}
             isHovered={isHovered}
             isClicked={isClicked}
+            isWalking={walking}
+            facingLeft={facingLeft}
           />
         </div>
       </div>

@@ -9,9 +9,38 @@
   filter: drop-shadow(0 0 6px rgba(255, 209, 102, 0.45));
 }
 
-.pixel-agent-shell.is-clicked .pixel-mascot {
-  animation: agent-click-pop 0.45s ease-out;
+.pixel-agent-shell.is-facing-left .pixel-mascot {
+  transform: scaleX(-1);
 }
+
+.pixel-agent-shell.is-walking .pixel-mascot {
+  animation: agent-walk-bob 0.45s steps(2, end) infinite;
+}
+
+@keyframes agent-walk-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.pixel-agent-shell.is-walking.is-facing-left .pixel-mascot {
+  animation: agent-walk-bob-left 0.45s steps(2, end) infinite;
+}
+
+@keyframes agent-walk-bob-left {
+  0%,
+  100% {
+    transform: scaleX(-1) translateY(0);
+  }
+  50% {
+    transform: scaleX(-1) translateY(-3px);
+  }
+}
+
 
 .pixel-mascot {
   display: block;

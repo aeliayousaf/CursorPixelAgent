@@ -7,6 +7,8 @@ interface PixelAgentProps {
   theme: "classic" | "sunset" | "forest";
   isHovered?: boolean;
   isClicked?: boolean;
+  isWalking?: boolean;
+  facingLeft?: boolean;
 }
 
 interface ThemePalette {
@@ -71,12 +73,16 @@ export function PixelAgent({
   theme,
   isHovered = false,
   isClicked = false,
+  isWalking = false,
+  facingLeft = false,
 }: PixelAgentProps) {
   const palette = THEME_STYLES[theme];
   const shellClass = [
     "pixel-agent-shell",
     isHovered ? "is-hovered" : "",
     isClicked ? "is-clicked" : "",
+    isWalking ? "is-walking" : "",
+    facingLeft ? "is-facing-left" : "",
   ]
     .filter(Boolean)
     .join(" ");

@@ -6,133 +6,263 @@ export interface CursorApiConfig {
 export interface CursorUsageSummary {
   usagePercent?: number;
   spendUsd?: number;
-  message?: string;
+  requestsToday?: number;
+  message: string;
   raw?: unknown;
 }
 
-/**
- * Optional Cursor Admin API client.
- * The desktop app works without this service; Git and extension events drive the pet.
- */
+const CURSOR_API_BASE_URL = "https://api.cursor.com";
+
+interface SpendMember {
+  spendCents?: number;
+  overallSpendCents?: number;
+  fastPremiumRequests?: number;
+  monthlyLimitDollars?: number | null;
+  email?: string;
+}
+
+interface SpendResponse {
+  teamMemberSpend?: SpendMember[];
+}
+
+interface DailyUsageRow {
+  usageBasedReqs?: number;
+  subscriptionIncludedReqs?: number;
+  apiKeyReqs?: number;
+}
+
+interface DailyUsageResponse {
+  data?: DailyUsageRow[];
+}
+
+interface ApiCallResult<T> {
+  data: T | null;
+  status: number | null;
+}
+
 export class CursorApiService {
   constructor(private readonly config: CursorApiConfig) {}
 
-  /**
-   * TODO: Confirm the official Cursor Admin API base URL from current documentation
-   * before enabling live requests in production builds.
-   */
-  private getBaseUrl(): string | null {
-    // TODO: Replace with the documented Cursor API base URL when available.
-    return null;
-  }
-
-  private buildHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      Authorization: `Bearer ${this.config.apiKey}`,
-    };
-    if (this.config.teamId) {
-      headers["X-Team-Id"] = this.config.teamId;
-    }
-    return headers;
-  }
-
-  /**
-   * TODO: Wire to the documented usage-events endpoint once confirmed.
-   */
   async fetchUsageEvents(): Promise<unknown | null> {
-    const baseUrl = this.getBaseUrl();
-    if (!baseUrl) {
-      return null;
-    }
-  // TODO: Replace path with documented usage-events route.
-    const url = `${baseUrl}/usage-events`;
-    return this.safeGet(url);
+    const endDate = Date.now();
+    const startDate = endDate - 24 * 60 * 60 * 1000;
+    const result = await this.safePost("/teams/filtered-usage-events", {
+      startDate,
+      endDate,
+      page: 1,
+      pageSize: 1,
+    });
+    return result.data;
   }
 
-  /**
-   * TODO: Wire to the documented spend-tracking endpoint once confirmed.
-   */
-  async fetchSpendTracking(): Promise<unknown | null> {
-    const baseUrl = this.getBaseUrl();
-    if (!baseUrl) {
-      return null;
-    }
-  // TODO: Replace path with documented spend-tracking route.
-    const url = `${baseUrl}/spend`;
-    return this.safeGet(url);
+  async fetchSpendTracking(): Promise<SpendResponse | null> {
+    const result = await this.safePost<SpendResponse>("/teams/spend", {
+      page: 1,
+      pageSize: 100,
+    });
+    return result.data;
   }
 
-  /**
-   * TODO: Wire to the documented token-usage endpoint once confirmed.
-   */
-  async fetchTokenUsage(): Promise<unknown | null> {
-    const baseUrl = this.getBaseUrl();
-    if (!baseUrl) {
-      return null;
-    }
-  // TODO: Replace path with documented token-usage route.
-    const url = `${baseUrl}/token-usage`;
-    return this.safeGet(url);
+  async fetchTokenUsage(): Promise<DailyUsageResponse | null> {
+    const result = await this.safePost<DailyUsageResponse>("/teams/daily-usage-data", {
+      startDate: startOfTodayMs(),
+      endDate: Date.now(),
+    });
+    return result.data;
   }
 
-  async fetchUsageSummary(): Promise<CursorUsageSummary | null> {
-    if (!this.config.apiKey.trim()) {
-      return null;
+  async fetchUsageSummary(): Promise<CursorUsageSummary> {
+    const apiKey = this.config.apiKey.trim();
+    if (!apiKey) {
+      return { message: "Add a Cursor API key in Settings." };
     }
 
-    const [usageEvents, spend, tokenUsage] = await Promise.all([
-      this.fetchUsageEvents(),
-      this.fetchSpendTracking(),
-      this.fetchTokenUsage(),
+    const [spendResult, dailyUsageResult] = await Promise.all([
+      this.safePost<SpendResponse>("/teams/spend", { page: 1, pageSize: 100 }),
+      this.safePost<DailyUsageResponse>("/teams/daily-usage-data", {
+        startDate: startOfTodayMs(),
+        endDate: Date.now(),
+      }),
     ]);
 
-    if (!usageEvents && !spend && !tokenUsage) {
-      return null;
+    const authStatus = spendResult.status ?? dailyUsageResult.status;
+    if (authStatus === 401) {
+      return {
+        message:
+          "Cursor rejected the API key (401). Use a team Admin API key from Dashboard → Settings → Advanced → Admin API Keys, not a Cloud Agents user key.",
+      };
     }
 
+    if (authStatus === 403) {
+      return {
+        message:
+          "This Cursor account does not have access to team usage endpoints (403). Admin usage data requires a team or enterprise plan with Admin API access.",
+      };
+    }
+
+    const spend = spendResult.data;
+    const dailyUsage = dailyUsageResult.data;
+
+    if (!spend && !dailyUsage) {
+      return {
+        message:
+          "Could not load Cursor usage. Confirm the Admin API key, team access, and Electron main-process logs.",
+      };
+    }
+
+    const spendUsd = this.extractCycleSpendUsd(spend);
+    const requestsToday = this.extractRequestsToday(dailyUsage);
+    const usagePercent = this.extractUsagePercent(spend);
+    const message = this.formatUsageMessage(spendUsd, requestsToday, usagePercent);
+
     return {
-      usagePercent: this.extractUsagePercent(usageEvents, tokenUsage),
-      spendUsd: this.extractSpendUsd(spend),
-      message: undefined,
-      raw: { usageEvents, spend, tokenUsage },
+      usagePercent,
+      spendUsd,
+      requestsToday,
+      message,
+      raw: { spend, dailyUsage },
     };
   }
 
-  private async safeGet(url: string): Promise<unknown | null> {
-    try {
-      const response = await fetch(url, { headers: this.buildHeaders() });
-      if (!response.ok) {
-        console.warn(`[Pixel Agent] Cursor API request failed: ${response.status} ${url}`);
-        return null;
-      }
-      return await response.json();
-    } catch (error) {
-      console.warn("[Pixel Agent] Cursor API request error:", error);
-      return null;
+  private authHeaderVariants(): Record<string, string>[] {
+    const apiKey = this.config.apiKey.trim();
+    const basicToken = Buffer.from(`${apiKey}:`, "utf8").toString("base64");
+    const baseHeaders = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+
+    const variants = [
+      { ...baseHeaders, Authorization: `Basic ${basicToken}` },
+      { ...baseHeaders, Authorization: `Bearer ${apiKey}` },
+    ];
+
+    const teamId = this.config.teamId?.trim();
+    if (!teamId) {
+      return variants;
     }
+
+    return variants.map((headers) => ({
+      ...headers,
+      "X-Team-Id": teamId,
+    }));
   }
 
-  private extractUsagePercent(...sources: Array<unknown | null>): number | undefined {
-    for (const source of sources) {
-      if (!source || typeof source !== "object") {
-        continue;
-      }
-      const candidate = source as Record<string, unknown>;
-      const value = candidate.usagePercent ?? candidate.percentUsed ?? candidate.percent;
-      if (typeof value === "number") {
-        return value;
+  private async safePost<T>(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<ApiCallResult<T>> {
+    const url = `${CURSOR_API_BASE_URL}${path}`;
+
+    for (const headers of this.authHeaderVariants()) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (response.ok) {
+          return {
+            data: (await response.json()) as T,
+            status: response.status,
+          };
+        }
+
+        const errorBody = await response.text();
+        if (response.status !== 401) {
+          console.warn(
+            `[Pixel Agent] Cursor API request failed: ${response.status} ${path} ${errorBody}`,
+          );
+          return { data: null, status: response.status };
+        }
+      } catch (error) {
+        console.warn("[Pixel Agent] Cursor API request error:", error);
+        return { data: null, status: null };
       }
     }
-    return undefined;
+
+    console.warn(`[Pixel Agent] Cursor API authentication failed for ${path}`);
+    return { data: null, status: 401 };
   }
 
-  private extractSpendUsd(source: unknown): number | undefined {
-    if (!source || typeof source !== "object") {
+  private extractCycleSpendUsd(spend: SpendResponse | null): number | undefined {
+    if (!spend?.teamMemberSpend?.length) {
       return undefined;
     }
-    const candidate = source as Record<string, unknown>;
-    const value = candidate.spendUsd ?? candidate.totalSpend ?? candidate.amount;
-    return typeof value === "number" ? value : undefined;
+
+    const totalCents = spend.teamMemberSpend.reduce(
+      (sum, member) => sum + (member.overallSpendCents ?? member.spendCents ?? 0),
+      0,
+    );
+    return totalCents / 100;
   }
+
+  private extractRequestsToday(dailyUsage: DailyUsageResponse | null): number | undefined {
+    if (!dailyUsage?.data?.length) {
+      return undefined;
+    }
+
+    return dailyUsage.data.reduce(
+      (sum, row) =>
+        sum +
+        (row.usageBasedReqs ?? 0) +
+        (row.subscriptionIncludedReqs ?? 0) +
+        (row.apiKeyReqs ?? 0),
+      0,
+    );
+  }
+
+  private extractUsagePercent(spend: SpendResponse | null): number | undefined {
+    if (!spend?.teamMemberSpend?.length) {
+      return undefined;
+    }
+
+    const totalSpendCents = spend.teamMemberSpend.reduce(
+      (sum, member) => sum + (member.overallSpendCents ?? member.spendCents ?? 0),
+      0,
+    );
+    const totalLimitDollars = spend.teamMemberSpend.reduce(
+      (sum, member) => sum + (member.monthlyLimitDollars ?? 0),
+      0,
+    );
+
+    if (totalLimitDollars <= 0) {
+      return undefined;
+    }
+
+    return Math.min(100, Math.round((totalSpendCents / 100 / totalLimitDollars) * 100));
+  }
+
+  private formatUsageMessage(
+    spendUsd: number | undefined,
+    requestsToday: number | undefined,
+    usagePercent: number | undefined,
+  ): string {
+    const parts: string[] = [];
+
+    if (spendUsd !== undefined) {
+      parts.push(`$${spendUsd.toFixed(2)} this billing cycle`);
+    }
+
+    if (requestsToday !== undefined) {
+      parts.push(`${requestsToday.toLocaleString()} requests today`);
+    }
+
+    if (usagePercent !== undefined) {
+      parts.push(`${usagePercent}% of monthly limit`);
+    }
+
+    if (parts.length === 0) {
+      return "Cursor usage loaded, but no spend or request totals were returned.";
+    }
+
+    return parts.join(" · ");
+  }
+}
+
+function startOfTodayMs(): number {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return start.getTime();
 }

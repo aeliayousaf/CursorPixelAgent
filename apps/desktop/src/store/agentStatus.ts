@@ -36,8 +36,14 @@ export function applyEventToAgentStatus(
 ): AgentStatusSnapshot {
   const next: AgentStatusSnapshot = {
     ...previous,
-    lastEventLabel: event.type.replaceAll("_", " "),
-    lastEventAt: event.timestamp,
+    lastEventLabel:
+      event.type === "ai_usage_update" && event.payload?.updateStatusOnly
+        ? previous.lastEventLabel
+        : event.type.replaceAll("_", " "),
+    lastEventAt:
+      event.type === "ai_usage_update" && event.payload?.updateStatusOnly
+        ? previous.lastEventAt
+        : event.timestamp,
   };
 
   if (event.source === "cursor-extension") {
