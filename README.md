@@ -96,6 +96,13 @@ Supported event types:
 - `git_push_failed`
 - `branch_changed`
 - `build_error`
+- `test_failed`
+- `merge_conflict`
+- `unsaved_files`
+- `stale_branch`
+- `language_focus`
+- `no_commits_today`
+- `long_session`
 - `ai_usage_update`
 - `warning`
 - `custom_message`
@@ -142,9 +149,15 @@ The service is structured for usage events, spend tracking, and token usage call
 - `Pixel Agent: Disconnect`
 - `Pixel Agent: Send Test Message`
 - `Pixel Agent: Show Current Git Status`
+- `Pixel Agent: Ask`
+- `Pixel Agent: Ping Desktop`
+- `Pixel Agent: Nudge to Commit`
+- `Pixel Agent: Mute for 1 Hour`
+- `Pixel Agent: Refresh Usage`
 
 ## Desktop controls
 
 - Drag the character to move the window
-- Right-click for Settings, Hide, Test Animation, and Quit
+- Double-click for the status panel (mood, recent events, usage trend)
+- Right-click for Settings, Refresh Usage, Nudge Commit, Mute, Hide, Test, Quit
 - Use the settings panel for always-on-top, size, theme, mute, startup, API key, team ID, and polling interval

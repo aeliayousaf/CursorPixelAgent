@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { PixelAgentEvent } from "@pixel-agent/shared";
-import { PixelAgentWebSocketClient } from "./websocketClient";
+import { EventThrottle } from "./eventThrottle";
+import { GitIntel } from "./gitIntel";
 
 interface GitApi {
   repositories: GitRepository[];
@@ -29,8 +30,8 @@ interface RepositorySnapshot {
 export class GitWatcher implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private readonly snapshots = new Map<string, RepositorySnapshot>();
-  private codingSessionStartedAt: number | null = null;
-  private codingReminderSent = false;
+  private readonly throttle = new EventThrottle();
+  private gitIntel: GitIntel | null = null;
 
   constructor(
     private readonly sendEvent: (event: PixelAgentEvent) => void,
@@ -51,38 +52,53 @@ export class GitWatcher implements vscode.Disposable {
       ? gitExtension.exports.getAPI(1)
       : (await gitExtension.activate()).getAPI(1);
 
+    this.gitIntel = new GitIntel(this.sendEvent);
+    this.gitIntel.start(gitApi.repositories);
+
     for (const repository of gitApi.repositories) {
       this.watchRepository(repository);
     }
 
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.emitWorkspaceOpened()),
-      vscode.workspace.onDidSaveTextDocument(() => this.trackCodingSession()),
-      vscode.workspace.onDidChangeTextDocument(() => this.trackCodingSession()),
       vscode.tasks.onDidStartTask((event) => {
         const name = event.execution.task.name.toLowerCase();
-        if (name.includes("push")) {
+        if (name.includes("push") && this.throttle.shouldSend("git_push_started")) {
           this.sendEvent(this.createEvent("git_push_started", { message: "Pushing your changes..." }));
         }
       }),
       vscode.tasks.onDidEndTaskProcess((event) => {
         const name = event.execution.task.name.toLowerCase();
+        if (name.includes("test") && event.exitCode !== 0) {
+          if (this.throttle.shouldSend("test_failed")) {
+            this.sendEvent(
+              this.createEvent("test_failed", {
+                message: "Tests failed. Want to check the output?",
+              }),
+            );
+          }
+          return;
+        }
         if (name.includes("build") && event.exitCode !== 0) {
-          this.sendEvent(
-            this.createEvent("build_error", {
-              message: "Build failed. Want to check the error?",
-            }),
-          );
+          if (this.throttle.shouldSend("build_error")) {
+            this.sendEvent(
+              this.createEvent("build_error", {
+                message: "Build failed. Want to check the error?",
+              }),
+            );
+          }
           return;
         }
         if (!name.includes("push")) {
           return;
         }
         if (event.exitCode === 0) {
-          this.sendEvent(
-            this.createEvent("git_push_success", { message: "Nice push! Your code is live." }),
-          );
-        } else {
+          if (this.throttle.shouldSend("git_push_success")) {
+            this.sendEvent(
+              this.createEvent("git_push_success", { message: "Nice push! Your code is live." }),
+            );
+          }
+        } else if (this.throttle.shouldSend("git_push_failed")) {
           this.sendEvent(
             this.createEvent("git_push_failed", { message: "Push failed. Want to check the error?" }),
           );
@@ -91,10 +107,10 @@ export class GitWatcher implements vscode.Disposable {
     );
 
     this.emitWorkspaceOpened();
-    this.trackCodingSession();
   }
 
   dispose(): void {
+    this.gitIntel?.dispose();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
@@ -120,7 +136,9 @@ export class GitWatcher implements vscode.Disposable {
     const lines = gitApi.repositories.map((repository) => {
       const snapshot = this.readSnapshot(repository);
       const repoName = repository.rootUri.fsPath.split(/[\\/]/).pop() ?? repository.rootUri.fsPath;
-      return `${repoName}: ${snapshot.dirty ? "dirty" : "clean"} on ${snapshot.branch ?? "unknown"}`;
+      const conflict =
+        repository.state.mergeChanges.length > 0 ? " · merge conflict" : "";
+      return `${repoName}: ${snapshot.dirty ? "dirty" : "clean"} on ${snapshot.branch ?? "unknown"}${conflict}`;
     });
 
     this.showStatus(lines.join(" | "));
@@ -132,6 +150,7 @@ export class GitWatcher implements vscode.Disposable {
     this.emitRepositoryState(repository);
 
     const subscription = repository.state.onDidChange(() => {
+      this.gitIntel?.onRepositoryStateChange(repository);
       const previous = this.snapshots.get(key) ?? this.readSnapshot(repository);
       const next = this.readSnapshot(repository);
       this.snapshots.set(key, next);
@@ -141,7 +160,6 @@ export class GitWatcher implements vscode.Disposable {
           this.createEvent("branch_changed", {
             repo: repository.rootUri.fsPath,
             branch: next.branch,
-            message: next.branch ? `You're on branch: ${next.branch}` : undefined,
           }),
         );
       }
@@ -151,21 +169,22 @@ export class GitWatcher implements vscode.Disposable {
           this.createEvent("git_commit_created", {
             repo: repository.rootUri.fsPath,
             branch: next.branch,
-            message: repository.inputBox.value || "Commit saved. Great progress!",
+            message: repository.inputBox.value || undefined,
+            moodDelta: 2,
           }),
         );
       }
 
       if (previous.dirty !== next.dirty) {
-        this.sendEvent(
-          this.createEvent(next.dirty ? "git_dirty" : "git_clean", {
-            repo: repository.rootUri.fsPath,
-            branch: next.branch,
-            message: next.dirty
-              ? "You have uncommitted changes."
-              : "Working tree is clean. Nice!",
-          }),
-        );
+        const type = next.dirty ? "git_dirty" : "git_clean";
+        if (this.throttle.shouldSend(type, key)) {
+          this.sendEvent(
+            this.createEvent(type, {
+              repo: repository.rootUri.fsPath,
+              branch: next.branch,
+            }),
+          );
+        }
       }
     });
 
@@ -188,6 +207,7 @@ export class GitWatcher implements vscode.Disposable {
         }),
       );
     }
+    this.gitIntel?.onRepositoryStateChange(repository);
   }
 
   private emitWorkspaceOpened(): void {
@@ -198,23 +218,6 @@ export class GitWatcher implements vscode.Disposable {
         message: `Workspace opened: ${workspaceName}`,
       }),
     );
-  }
-
-  private trackCodingSession(): void {
-    if (!this.codingSessionStartedAt) {
-      this.codingSessionStartedAt = Date.now();
-      return;
-    }
-
-    const elapsedMinutes = Math.floor((Date.now() - this.codingSessionStartedAt) / 60_000);
-    if (elapsedMinutes >= 45 && !this.codingReminderSent) {
-      this.codingReminderSent = true;
-      this.sendEvent(
-        this.createEvent("warning", {
-          message: "You've been coding for 45 minutes. Maybe commit soon?",
-        }),
-      );
-    }
   }
 
   private readSnapshot(repository: GitRepository): RepositorySnapshot {

@@ -11,6 +11,7 @@ let wsServer: EventWebSocketServer | null = null;
 let cursorApi: CursorApiService | null = null;
 let usagePollTimer: NodeJS.Timeout | null = null;
 let windowWalker: WindowWalker | null = null;
+let lastSpendUsd: number | undefined;
 
 const settingsStore = new SettingsStore();
 
@@ -62,6 +63,18 @@ function restartUsagePolling(): void {
       return;
     }
     const usage = await cursorApi.fetchUsageSummary();
+
+    let usageTrend: string | undefined;
+    if (usage.spendUsd !== undefined && lastSpendUsd !== undefined) {
+      const delta = usage.spendUsd - lastSpendUsd;
+      if (Math.abs(delta) >= 0.01) {
+        usageTrend = delta >= 0 ? `+$${delta.toFixed(2)} since last check` : `-$${Math.abs(delta).toFixed(2)} since last check`;
+      }
+    }
+    if (usage.spendUsd !== undefined) {
+      lastSpendUsd = usage.spendUsd;
+    }
+
     wsServer?.emitLocalEvent({
       type: "ai_usage_update",
       source: "desktop-cursor-api",
@@ -71,6 +84,7 @@ function restartUsagePolling(): void {
         usagePercent: usage.usagePercent,
         spendUsd: usage.spendUsd,
         requestsToday: usage.requestsToday,
+        usageTrend,
         updateStatusOnly: true,
       },
     });
@@ -193,11 +207,103 @@ function registerIpc(): void {
     app.quit();
   });
 
+  ipcMain.handle("usage:refresh", async () => {
+    const settings = settingsStore.get();
+    if (!settings.cursorApiKey) {
+      return { ok: false, message: "No Cursor API key configured." };
+    }
+    cursorApi = new CursorApiService({
+      apiKey: settings.cursorApiKey,
+      teamId: settings.teamId,
+    });
+    const usage = await cursorApi.fetchUsageSummary();
+    let usageTrend: string | undefined;
+    if (usage.spendUsd !== undefined && lastSpendUsd !== undefined) {
+      const delta = usage.spendUsd - lastSpendUsd;
+      if (Math.abs(delta) >= 0.01) {
+        usageTrend = delta >= 0 ? `+$${delta.toFixed(2)} since last check` : `-$${Math.abs(delta).toFixed(2)} since last check`;
+      }
+    }
+    if (usage.spendUsd !== undefined) {
+      lastSpendUsd = usage.spendUsd;
+    }
+    wsServer?.emitLocalEvent({
+      type: "ai_usage_update",
+      source: "desktop-cursor-api",
+      timestamp: new Date().toISOString(),
+      payload: {
+        message: usage.message,
+        usagePercent: usage.usagePercent,
+        spendUsd: usage.spendUsd,
+        requestsToday: usage.requestsToday,
+        usageTrend,
+        updateStatusOnly: true,
+      },
+    });
+    return { ok: true, message: usage.message };
+  });
+
   ipcMain.on("context:open", () => {
     const menu = Menu.buildFromTemplate([
       {
         label: "Settings",
         click: () => broadcastToRenderer("ui:open-settings", null),
+      },
+      {
+        label: "Refresh Usage",
+        click: () => {
+          void (async () => {
+            const settings = settingsStore.get();
+            if (!settings.cursorApiKey) {
+              broadcastToRenderer("agent:event", {
+                type: "warning",
+                source: "desktop-ui",
+                timestamp: new Date().toISOString(),
+                payload: { message: "Add a Cursor API key in Settings first." },
+              });
+              return;
+            }
+            cursorApi = new CursorApiService({
+              apiKey: settings.cursorApiKey,
+              teamId: settings.teamId,
+            });
+            const usage = await cursorApi.fetchUsageSummary();
+            wsServer?.emitLocalEvent({
+              type: "ai_usage_update",
+              source: "desktop-cursor-api",
+              timestamp: new Date().toISOString(),
+              payload: {
+                message: usage.message,
+                usagePercent: usage.usagePercent,
+                updateStatusOnly: true,
+              },
+            });
+          })();
+        },
+      },
+      {
+        label: "Nudge Commit",
+        click: () =>
+          wsServer?.emitLocalEvent({
+            type: "warning",
+            source: "desktop-ui",
+            timestamp: new Date().toISOString(),
+            payload: { message: "Friendly nudge: commit your progress!" },
+          }),
+      },
+      {
+        label: "Mute 1 Hour",
+        click: () => {
+          const muteUntil = Date.now() + 60 * 60 * 1000;
+          settingsStore.update({ mutedUntil: muteUntil });
+          applyWindowSettings(settingsStore.get());
+          wsServer?.emitLocalEvent({
+            type: "custom_message",
+            source: "desktop-ui",
+            timestamp: new Date().toISOString(),
+            payload: { message: "Muted for 1 hour.", updateStatusOnly: false },
+          });
+        },
       },
       {
         label: "Hide",

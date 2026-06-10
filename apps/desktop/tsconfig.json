@@ -20,5 +20,5 @@
       "@pixel-agent/shared": ["../../shared/types/events.ts"]
     }
   },
-  "include": ["src/renderer", "src/components", "src/animations", "src/store", "src/services", "src/hooks"]
+  "include": ["src/renderer", "src/components", "src/animations", "src/store", "src/hooks"]
 }

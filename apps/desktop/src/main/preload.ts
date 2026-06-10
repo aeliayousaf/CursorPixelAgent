@@ -10,6 +10,7 @@ export interface DesktopApi {
   onOpenSettings: (callback: () => void) => () => void;
   onWalkerState: (callback: (state: WalkerState) => void) => () => void;
   setWalkerPaused: (paused: boolean) => void;
+  refreshUsage: () => Promise<{ ok: boolean; message: string }>;
   hideWindow: () => void;
   quitApp: () => void;
   openContextMenu: () => void;
@@ -54,6 +55,7 @@ const desktopApi: DesktopApi = {
     return () => ipcRenderer.removeListener("walker:state", listener);
   },
   setWalkerPaused: (paused) => ipcRenderer.send("walker:set-paused", paused),
+  refreshUsage: () => ipcRenderer.invoke("usage:refresh"),
   hideWindow: () => ipcRenderer.send("window:hide"),
   quitApp: () => ipcRenderer.send("app:quit"),
   openContextMenu: () => ipcRenderer.send("context:open"),

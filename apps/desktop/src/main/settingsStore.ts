@@ -12,6 +12,7 @@ const defaults: AppSettings = {
   teamId: "",
   usagePollIntervalMs: 300_000,
   wsPort: PIXEL_AGENT_WS_PORT,
+  mutedUntil: 0,
 };
 
 export class SettingsStore {

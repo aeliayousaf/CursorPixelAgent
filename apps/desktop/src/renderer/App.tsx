@@ -18,6 +18,8 @@ export function App() {
     setSettingsOpen,
     updateSettings,
     triggerTestAnimation,
+    refreshUsage,
+    isMuted,
     hideWindow,
     quitApp,
     openContextMenu,
@@ -26,7 +28,10 @@ export function App() {
   const [statusOpen, setStatusOpen] = useState(false);
   const walkerPaused = settingsOpen || statusOpen;
   const { walking, facingLeft } = useWindowWalker(walkerPaused);
-  const idleMessage = useIdleMessages(!bubbleMessage && !walkerPaused);
+  const idleMessage = useIdleMessages(
+    !bubbleMessage && !walkerPaused && !isMuted,
+    agentStatus,
+  );
   const activeMessage = bubbleMessage ?? idleMessage;
 
   const {
@@ -78,12 +83,18 @@ export function App() {
         onChange={updateSettings}
       />
 
-      <StatusPanel open={statusOpen} status={agentStatus} onClose={() => setStatusOpen(false)} />
+      <StatusPanel
+        open={statusOpen}
+        status={agentStatus}
+        isMuted={isMuted}
+        onClose={() => setStatusOpen(false)}
+        onRefreshUsage={() => void refreshUsage()}
+      />
 
       <div className="flex h-full flex-col items-center justify-end gap-3 px-3 pb-4">
         {activeMessage ? <SpeechBubble message={activeMessage} /> : null}
         <div
-          className="drag-region cursor-grab active:cursor-grabbing"
+          className={`drag-region cursor-grab active:cursor-grabbing ${agentStatus.mood === "ecstatic" || agentStatus.mood === "happy" ? "is-mood-happy" : ""} ${agentStatus.mood === "stressed" || agentStatus.mood === "concerned" ? "is-mood-alert" : ""}`}
           onMouseDown={() => window.pixelAgent.notifyDragStart()}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}

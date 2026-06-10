@@ -32,6 +32,26 @@
       {
         "command": "pixelAgent.showGitStatus",
         "title": "Pixel Agent: Show Current Git Status"
+      },
+      {
+        "command": "pixelAgent.ask",
+        "title": "Pixel Agent: Ask"
+      },
+      {
+        "command": "pixelAgent.ping",
+        "title": "Pixel Agent: Ping Desktop"
+      },
+      {
+        "command": "pixelAgent.nudgeCommit",
+        "title": "Pixel Agent: Nudge to Commit"
+      },
+      {
+        "command": "pixelAgent.mute",
+        "title": "Pixel Agent: Mute for 1 Hour"
+      },
+      {
+        "command": "pixelAgent.refreshUsage",
+        "title": "Pixel Agent: Refresh Usage"
       }
     ]
   },

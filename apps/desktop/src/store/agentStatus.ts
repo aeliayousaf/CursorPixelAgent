@@ -1,4 +1,12 @@
+import type { MoodLevel } from "./moodStore";
+
 export type GitStatusState = "dirty" | "clean" | "unknown";
+
+export interface RecentEventEntry {
+  type: string;
+  message: string;
+  at: string;
+}
 
 export interface AgentStatusSnapshot {
   repo: string | null;
@@ -9,6 +17,12 @@ export interface AgentStatusSnapshot {
   lastExtensionAt: string | null;
   connectionStatus: "connected" | "waiting";
   usageSummary: string | null;
+  usageTrend: string | null;
+  activeLanguage: string | null;
+  unsavedCount: number | null;
+  mood: MoodLevel;
+  moodScore: number;
+  recentEvents: RecentEventEntry[];
 }
 
 export const INITIAL_AGENT_STATUS: AgentStatusSnapshot = {
@@ -20,7 +34,15 @@ export const INITIAL_AGENT_STATUS: AgentStatusSnapshot = {
   lastExtensionAt: null,
   connectionStatus: "waiting",
   usageSummary: null,
+  usageTrend: null,
+  activeLanguage: null,
+  unsavedCount: null,
+  mood: "neutral",
+  moodScore: 0,
+  recentEvents: [],
 };
+
+const MAX_RECENT_EVENTS = 5;
 
 function repoLabel(repoPath: string | undefined): string | null {
   if (!repoPath) {
@@ -33,17 +55,31 @@ function repoLabel(repoPath: string | undefined): string | null {
 export function applyEventToAgentStatus(
   previous: AgentStatusSnapshot,
   event: import("@pixel-agent/shared").PixelAgentEvent,
+  moodLevel?: MoodLevel,
+  moodScore?: number,
 ): AgentStatusSnapshot {
+  const updateStatusOnly =
+    event.type === "ai_usage_update" && event.payload?.updateStatusOnly === true;
+
+  const message =
+    typeof event.payload?.message === "string" && event.payload.message.trim().length > 0
+      ? event.payload.message
+      : event.type.replaceAll("_", " ");
+
+  const recentEvents = updateStatusOnly
+    ? previous.recentEvents
+    : [
+        { type: event.type, message, at: event.timestamp },
+        ...previous.recentEvents,
+      ].slice(0, MAX_RECENT_EVENTS);
+
   const next: AgentStatusSnapshot = {
     ...previous,
-    lastEventLabel:
-      event.type === "ai_usage_update" && event.payload?.updateStatusOnly
-        ? previous.lastEventLabel
-        : event.type.replaceAll("_", " "),
-    lastEventAt:
-      event.type === "ai_usage_update" && event.payload?.updateStatusOnly
-        ? previous.lastEventAt
-        : event.timestamp,
+    recentEvents,
+    lastEventLabel: updateStatusOnly ? previous.lastEventLabel : event.type.replaceAll("_", " "),
+    lastEventAt: updateStatusOnly ? previous.lastEventAt : event.timestamp,
+    mood: moodLevel ?? previous.mood,
+    moodScore: moodScore ?? previous.moodScore,
   };
 
   if (event.source === "cursor-extension") {
@@ -59,6 +95,14 @@ export function applyEventToAgentStatus(
     next.branch = event.payload.branch;
   }
 
+  if (typeof event.payload?.language === "string") {
+    next.activeLanguage = event.payload.language;
+  }
+
+  if (typeof event.payload?.unsavedCount === "number") {
+    next.unsavedCount = event.payload.unsavedCount;
+  }
+
   if (event.type === "git_dirty") {
     next.gitStatus = "dirty";
   } else if (event.type === "git_clean") {
@@ -68,8 +112,9 @@ export function applyEventToAgentStatus(
   if (event.type === "ai_usage_update") {
     if (typeof event.payload?.message === "string") {
       next.usageSummary = event.payload.message;
-    } else if (typeof event.payload?.usagePercent === "number") {
-      next.usageSummary = `Usage at ${event.payload.usagePercent}%`;
+    }
+    if (typeof event.payload?.usageTrend === "string") {
+      next.usageTrend = event.payload.usageTrend;
     }
   }
 

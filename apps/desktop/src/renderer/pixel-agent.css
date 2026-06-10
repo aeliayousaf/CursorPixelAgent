@@ -5,6 +5,14 @@
   transform: scale(var(--agent-scale));
 }
 
+.is-mood-happy .pixel-agent-shell {
+  filter: drop-shadow(0 0 4px rgba(255, 209, 102, 0.35));
+}
+
+.is-mood-alert .pixel-agent-shell {
+  filter: drop-shadow(0 0 4px rgba(255, 93, 93, 0.35));
+}
+
 .pixel-agent-shell.is-hovered .pixel-mascot {
   filter: drop-shadow(0 0 6px rgba(255, 209, 102, 0.45));
 }

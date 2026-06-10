@@ -14,6 +14,7 @@ export interface DesktopApi {
   onOpenSettings: (callback: () => void) => () => void;
   onWalkerState: (callback: (state: WalkerViewState) => void) => () => void;
   setWalkerPaused: (paused: boolean) => void;
+  refreshUsage: () => Promise<{ ok: boolean; message: string }>;
   hideWindow: () => void;
   quitApp: () => void;
   openContextMenu: () => void;

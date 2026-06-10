@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PIXEL_AGENT_WS_PORT } from "@pixel-agent/shared";
 import type { AppSettings } from "../types/settings";
 import type { PixelAgentEvent } from "@pixel-agent/shared";
-import { presentationForEvent } from "../store/agentStore";
 import {
   applyEventToAgentStatus,
   INITIAL_AGENT_STATUS,
   type AgentStatusSnapshot,
 } from "../store/agentStatus";
+import { EventEngine } from "../store/eventEngine";
+import { MoodTracker } from "../store/moodStore";
+import { playAgentSound } from "../renderer/services/agentSounds";
 
 const defaultSettings: AppSettings = {
   alwaysOnTop: true,
@@ -19,9 +21,14 @@ const defaultSettings: AppSettings = {
   teamId: "",
   usagePollIntervalMs: 300_000,
   wsPort: PIXEL_AGENT_WS_PORT,
+  mutedUntil: 0,
 };
 
 const CONNECTION_STALE_MS = 120_000;
+
+function isMuted(settings: AppSettings): boolean {
+  return settings.mutedUntil > Date.now();
+}
 
 export function useDesktopBridge() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
@@ -30,6 +37,49 @@ export function useDesktopBridge() {
   const [bubbleMessage, setBubbleMessage] = useState<string | null>(null);
   const [animation, setAnimation] = useState<"idle" | "happy" | "alert" | "thinking" | "sleeping">("idle");
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const eventEngineRef = useRef(new EventEngine());
+  const moodTrackerRef = useRef(new MoodTracker());
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
+  const handleAgentEvent = useCallback(
+    async (event: PixelAgentEvent) => {
+      if (event.payload?.action === "refresh_usage") {
+        await window.pixelAgent.refreshUsage();
+        return;
+      }
+
+      if (event.payload?.action === "mute" && typeof event.payload.muteUntil === "string") {
+        const muteUntil = Date.parse(event.payload.muteUntil);
+        if (!Number.isNaN(muteUntil)) {
+          const next = await window.pixelAgent.updateSettings({ mutedUntil: muteUntil });
+          setSettings(next);
+        }
+      }
+
+      const muted = isMuted(settingsRef.current);
+      const { showBubble, presentation } = eventEngineRef.current.evaluate(event, muted);
+      const moodLevel = moodTrackerRef.current.applyDelta(presentation.moodDelta);
+
+      setLatestEvent(event);
+      setAgentStatus((previous) =>
+        applyEventToAgentStatus(previous, event, moodLevel, moodTrackerRef.current.getScore()),
+      );
+
+      if (!showBubble) {
+        return;
+      }
+
+      setAnimation(presentation.animation);
+      setBubbleMessage(presentation.message);
+
+      if (!settingsRef.current.muteSounds) {
+        playAgentSound(presentation.playSound);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -44,19 +94,7 @@ export function useDesktopBridge() {
       .catch(() => undefined);
 
     const unsubEvent = window.pixelAgent.onAgentEvent((event) => {
-      const presentation = presentationForEvent(event);
-      const updateStatusOnly =
-        event.type === "ai_usage_update" && event.payload?.updateStatusOnly === true;
-
-      setLatestEvent(event);
-      setAgentStatus((previous) => applyEventToAgentStatus(previous, event));
-
-      if (updateStatusOnly) {
-        return;
-      }
-
-      setAnimation(presentation.animation);
-      setBubbleMessage(presentation.message);
+      void handleAgentEvent(event);
     });
 
     const unsubSettings = window.pixelAgent.onSettingsUpdated((value) => {
@@ -73,13 +111,16 @@ export function useDesktopBridge() {
       unsubSettings();
       unsubOpenSettings();
     };
-  }, []);
+  }, [handleAgentEvent]);
 
   useEffect(() => {
     if (!bubbleMessage) {
       return;
     }
-    const timer = window.setTimeout(() => setBubbleMessage(null), 5000);
+    const timer = window.setTimeout(() => {
+      setBubbleMessage(null);
+      eventEngineRef.current.resetBubbleLock();
+    }, 5000);
     return () => window.clearTimeout(timer);
   }, [bubbleMessage]);
 
@@ -107,14 +148,16 @@ export function useDesktopBridge() {
   }, []);
 
   const triggerTestAnimation = useCallback(() => {
-    const presentation = presentationForEvent({
+    void handleAgentEvent({
       type: "custom_message",
       source: "desktop-ui",
       timestamp: new Date().toISOString(),
       payload: { message: "Test animation!" },
     });
-    setAnimation(presentation.animation);
-    setBubbleMessage(presentation.message);
+  }, [handleAgentEvent]);
+
+  const refreshUsage = useCallback(async () => {
+    await window.pixelAgent.refreshUsage();
   }, []);
 
   return {
@@ -127,6 +170,8 @@ export function useDesktopBridge() {
     setSettingsOpen,
     updateSettings,
     triggerTestAnimation,
+    refreshUsage,
+    isMuted: isMuted(settings),
     hideWindow: () => window.pixelAgent.hideWindow(),
     quitApp: () => window.pixelAgent.quitApp(),
     openContextMenu: () => window.pixelAgent.openContextMenu(),

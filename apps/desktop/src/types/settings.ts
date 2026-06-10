@@ -8,4 +8,5 @@ export interface AppSettings {
   teamId: string;
   usagePollIntervalMs: number;
   wsPort: number;
+  mutedUntil: number;
 }

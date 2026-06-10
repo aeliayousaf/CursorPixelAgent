@@ -1,11 +1,13 @@
 import * as vscode from "vscode";
 import type { PixelAgentEvent } from "@pixel-agent/shared";
+import { ActivityWatcher } from "./activityWatcher";
 import { registerPixelAgentCommands } from "./commands";
 import { GitWatcher } from "./gitWatcher";
 import { PixelAgentWebSocketClient } from "./websocketClient";
 
 let client: PixelAgentWebSocketClient | null = null;
 let gitWatcher: GitWatcher | null = null;
+let activityWatcher: ActivityWatcher | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const showStatus = (message: string): void => {
@@ -18,11 +20,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   client = new PixelAgentWebSocketClient({ onStatus: showStatus });
   gitWatcher = new GitWatcher(sendEvent, showStatus);
+  activityWatcher = new ActivityWatcher(sendEvent);
 
-  registerPixelAgentCommands(context, client, gitWatcher, sendEvent);
+  registerPixelAgentCommands(context, client, gitWatcher, activityWatcher, sendEvent);
 
   client.connect();
   void gitWatcher.start();
+  activityWatcher.start();
 
   sendEvent({
     type: "cursor_opened",
@@ -35,8 +39,10 @@ export function activate(context: vscode.ExtensionContext): void {
     dispose: () => {
       client?.disconnect();
       gitWatcher?.dispose();
+      activityWatcher?.dispose();
       client = null;
       gitWatcher = null;
+      activityWatcher = null;
     },
   });
 }
@@ -44,4 +50,5 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
   client?.disconnect();
   gitWatcher?.dispose();
+  activityWatcher?.dispose();
 }
